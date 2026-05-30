@@ -9,7 +9,7 @@ This project uses 2023 MEPS and 2023 BRFSS data to analyze healthcare costs, hea
 
 ## Important note
 
-Raw datasets are not stored directly in GitHub because the BRFSS ASCII file is very large. Raw datasets are shared through OneDrive or Git LFS.
+Raw datasets are not stored directly in GitHub because the BRFSS file is very large. Raw datasets are shared through OneDrive.
 
 ## Folder Structure
 
