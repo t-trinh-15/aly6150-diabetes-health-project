@@ -1,0 +1,9 @@
+.DS_Store
+**/.DS_Store
+
+# Large raw data files
+data/raw/
+*.xpt
+*.XPT
+*.sas7bdat
+*.zip
