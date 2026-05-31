@@ -7,3 +7,7 @@ data/raw/
 *.XPT
 *.sas7bdat
 *.zip
+
+# Python caches
+__pycache__/
+*.pyc
