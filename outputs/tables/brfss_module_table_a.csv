@@ -1,0 +1,5 @@
+Variable,Category,N (valid),Statistic,Missing %
+Takes insulin,Yes,674,233 (34.6%),0.3%
+Recent A1C check (past year),Yes,676,655 (96.9%),0.0%
+Recent dilated eye exam,Yes,676,133 (19.7%),0.0%
+Preventive care index (0-2),median (IQR),676,1.0 (1.0–1.0),0.0%

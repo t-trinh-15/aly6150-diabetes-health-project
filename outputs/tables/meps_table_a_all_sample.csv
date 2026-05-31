@@ -1,0 +1,28 @@
+Variable,Category,N (valid),Statistic,Missing %
+Total medical expense ($),median (IQR),812,"8,642 (2,072–19,741)",0.0%
+Out-of-pocket spending ($),median (IQR),812,424.5 (82.8–1463.0),0.0%
+Prescription spending ($),median (IQR),812,"2,811 (288–9,194)",0.0%
+High spender (top 25%),Yes,812,203 (25.0%),0.0%
+Any ER visit,Yes,812,211 (26.0%),0.0%
+Any inpatient stay,Yes,812,105 (12.9%),0.0%
+Age (years),median (IQR),812,57.0 (52.0–61.0),0.0%
+Age band,45-54,812,290 (35.7%),0.0%
+,55-64,812,522 (64.3%),
+Sex,Female,812,417 (51.4%),0.0%
+,Male,812,395 (48.6%),
+Race / ethnicity,Hispanic,812,203 (25.0%),0.0%
+,NH Asian,812,45 (5.5%),
+,NH Black,812,177 (21.8%),
+,NH Other/Multiple,812,23 (2.8%),
+,NH White,812,364 (44.8%),
+Insurance coverage,Any private,812,459 (56.5%),0.0%
+,Public only,812,292 (36.0%),
+,Uninsured,812,61 (7.5%),
+Poverty tier,High Income (400%+),812,251 (30.9%),0.0%
+,Low Income (125-199%),812,118 (14.5%),
+,Middle Income (200-399%),812,231 (28.4%),
+,Near Poor (100-124%),812,45 (5.5%),
+,Poor (<100% FPL),812,167 (20.6%),
+<200% FPL,Yes,812,330 (40.6%),0.0%
+Northeast region,Yes,812,98 (12.1%),0.0%
+Comorbidity count (0-4),median (IQR),809,2.0 (1.0–2.0),0.4%

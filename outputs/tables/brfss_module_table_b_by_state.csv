@@ -1,0 +1,6 @@
+Variable,Category,Overall,State: Maine,State: New Hampshire,Test,p-value
+,(n),676,465,211,,
+Takes insulin,Yes,233 (34.6%),159 (34.3%),74 (35.1%),Chi-square,0.922
+Recent A1C check (past year),Yes,655 (96.9%),450 (96.8%),205 (97.2%),Chi-square,0.979
+Recent dilated eye exam,Yes,133 (19.7%),95 (20.4%),38 (18.0%),Chi-square,0.529
+Preventive care index (0-2),median (IQR),1.0 (1.0–1.0),1.0 (1.0–1.0),1.0 (1.0–1.0),Mann-Whitney U,0.569

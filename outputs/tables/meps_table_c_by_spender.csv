@@ -1,0 +1,27 @@
+Variable,Category,Overall,Spender group: Bottom 75%,Spender group: Top 25%,Test,p-value
+,(n),812,609,203,,
+Total medical expense ($),median (IQR),"8,642 (2,072–19,741)","4,941 (1,173–10,908)","35,437 (25,487–59,733)",Mann-Whitney U,<0.001
+Out-of-pocket spending ($),median (IQR),424.5 (82.8–1463.0),345.0 (56.0–1095.0),"1,084 (174–3,242)",Mann-Whitney U,<0.001
+Prescription spending ($),median (IQR),"2,811 (288–9,194)","1,112 (161–5,979)","14,591 (4,582–24,202)",Mann-Whitney U,<0.001
+Any ER visit,Yes,211 (26.0%),116 (19.0%),95 (46.8%),Chi-square,<0.001
+Any inpatient stay,Yes,105 (12.9%),35 (5.7%),70 (34.5%),Chi-square,<0.001
+Age (years),median (IQR),57.0 (52.0–61.0),57.0 (52.0–61.0),58.0 (53.0–61.0),Mann-Whitney U,0.455
+Age band,45-54,290 (35.7%),227 (37.3%),63 (31.0%),Chi-square,0.128
+,55-64,522 (64.3%),382 (62.7%),140 (69.0%),,
+Sex,Female,417 (51.4%),298 (48.9%),119 (58.6%),Chi-square,0.021
+,Male,395 (48.6%),311 (51.1%),84 (41.4%),,
+Race / ethnicity,Hispanic,203 (25.0%),171 (28.1%),32 (15.8%),Chi-square,0.001
+,NH Asian,45 (5.5%),38 (6.2%),7 (3.4%),,
+,NH Black,177 (21.8%),131 (21.5%),46 (22.7%),,
+,NH Other/Multiple,23 (2.8%),15 (2.5%),8 (3.9%),,
+,NH White,364 (44.8%),254 (41.7%),110 (54.2%),,
+Insurance coverage,Any private,459 (56.5%),354 (58.1%),105 (51.7%),Chi-square,<0.001
+,Public only,292 (36.0%),196 (32.2%),96 (47.3%),,
+,Uninsured,61 (7.5%),59 (9.7%),2 (1.0%),,
+Poverty tier,High Income (400%+),251 (30.9%),197 (32.3%),54 (26.6%),Chi-square,0.013
+,Low Income (125-199%),118 (14.5%),92 (15.1%),26 (12.8%),,
+,Middle Income (200-399%),231 (28.4%),180 (29.6%),51 (25.1%),,
+,Near Poor (100-124%),45 (5.5%),28 (4.6%),17 (8.4%),,
+,Poor (<100% FPL),167 (20.6%),112 (18.4%),55 (27.1%),,
+<200% FPL,Yes,330 (40.6%),232 (38.1%),98 (48.3%),Chi-square,0.013
+Comorbidity count (0-4),median (IQR),2.0 (1.0–2.0),2.0 (1.0–2.0),2.0 (1.0–2.0),Mann-Whitney U,<0.001
