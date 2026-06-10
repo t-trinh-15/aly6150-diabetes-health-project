@@ -1,32 +1,44 @@
-"""Descriptive statistics tables for MEPS and BRFSS analytic datasets.
-
-Produces two table types per dataset:
-  Table A — all-sample summary (outcomes + predictors)
-  Table B — stratified by a chosen sub-group, with statistical tests
-
-Conventions:
-  - Continuous variables : report median (IQR) — robust to skew
-  - Binary variables     : report n (%) for "Yes" (==1)
-  - Categorical variables: report n (%) per category
-  - Unweighted estimates are the default; pass weights= to weight
-  - Statistical tests: chi-square (categorical), Mann-Whitney U (continuous,
-    2 groups), Kruskal-Wallis (continuous, 3+ groups)
-"""
-
 from __future__ import annotations
-
+ 
 import numpy as np
 import pandas as pd
 from scipy import stats
 
+"""Descriptive statistics tables for MEPS and BRFSS analytic datasets.
+ 
+Produces two table types per dataset:
+  Table A — all-sample summary (outcomes + predictors)
+  Table B — stratified by a chosen sub-group, with statistical tests
+ 
+Variable dictionaries:
+  MEPS_VARS               — core MEPS variables
+  BRFSS_VARS              — core BRFSS variables (includes region)
+  BRFSS_SDOH_VARS         — Social Determinants module (Module 29)
+  BRFSS_DIABETES_MODULE_VARS — Diabetes self-management module (Module 2)
+ 
+Subset helpers:
+  brfss_sdoh_subset()            — filters to sdoh_eligible == 1
+  brfss_diabetes_module_subset() — filters to preventive_care_eligible == 1
+ 
+Conventions:
+  - Continuous variables : report median (IQR) — robust to skew
+  - Binary variables     : report n (%) for "Yes" (==1)
+  - Categorical variables: report n (%) per category; respects Pandas
+    Categorical ordering when present (e.g. income_tier)
+  - Unweighted estimates are the default
+  - Statistical tests: chi-square (categorical), Mann-Whitney U (continuous,
+    2 groups), Kruskal-Wallis (continuous, 3+ groups)
+"""
 
+ 
+ 
 # ===========================================================================
 # Variable specifications
 # ===========================================================================
 # Each entry maps variable_name -> dict with at least:
 #   "label" : human-readable label
 #   "type"  : "continuous" | "binary" | "categorical"
-
+ 
 MEPS_VARS = {
     # Outcomes (continuous + binary)
     "total_medical_expense": {"label": "Total medical expense ($)",   "type": "continuous"},
@@ -47,7 +59,7 @@ MEPS_VARS = {
     # Comorbidities
     "comorbidity_count":     {"label": "Comorbidity count (0-4)",     "type": "continuous"},
 }
-
+ 
 BRFSS_VARS = {
     # Outcomes
     "missed_care_cost":      {"label": "Missed care due to cost",     "type": "binary"},
@@ -61,6 +73,8 @@ BRFSS_VARS = {
     "education_label":       {"label": "Education",                   "type": "categorical"},
     "income_tier":           {"label": "Income tier",                 "type": "categorical"},
     "is_low_income":         {"label": "Low income (<$50K)",          "type": "binary"},
+    # Geography
+    "region":                {"label": "Region",                      "type": "categorical"},
     # Risk behaviors
     "obese":                 {"label": "Obese (BMI ≥30)",             "type": "binary"},
     "current_smoker":        {"label": "Current smoker",              "type": "binary"},
@@ -71,7 +85,18 @@ BRFSS_VARS = {
     "physhlth_days":         {"label": "Days physical health not good","type": "continuous"},
     "menthlth_days":         {"label": "Days mental health not good",  "type": "continuous"},
 }
-
+ 
+# Social Determinants of Health variables (Module 29).
+# Scope analyses to sdoh_eligible == 1 before using this dict.
+BRFSS_SDOH_VARS = {
+    "receives_snap":         {"label": "Receives SNAP/food stamps",   "type": "binary"},
+    "food_insecure":         {"label": "Food insecure",               "type": "binary"},
+    "housing_cost_burden":   {"label": "Unable to pay rent/mortgage", "type": "binary"},
+    "utilities_shutoff":     {"label": "Utilities shut off",          "type": "binary"},
+    "transport_barrier":     {"label": "Transportation barrier",      "type": "binary"},
+    "sdoh_burden_index":     {"label": "SDOH burden index (0-4)",     "type": "continuous"},
+}
+ 
 # Separate dict for variables that only exist in the diabetes self-management
 # module (ME + NH only). Use this for a sub-table or for Table A's footnote section.
 BRFSS_DIABETES_MODULE_VARS = {
@@ -80,18 +105,18 @@ BRFSS_DIABETES_MODULE_VARS = {
     "recent_eye_exam":          {"label": "Recent dilated eye exam",      "type": "binary"},
     "preventive_care_index":    {"label": "Preventive care index (0-2)",  "type": "continuous"},
 }
-
-
+ 
+ 
 # ===========================================================================
 # Summary helpers (unweighted)
 # ===========================================================================
-
+ 
 def _fmt_n_pct(n: int, total: int) -> str:
     if total == 0:
         return "—"
     return f"{n:,} ({n / total * 100:.1f}%)"
-
-
+ 
+ 
 def _fmt_median_iqr(series: pd.Series) -> str:
     s = series.dropna()
     if len(s) == 0:
@@ -102,8 +127,8 @@ def _fmt_median_iqr(series: pd.Series) -> str:
     if med >= 1000:
         return f"{med:,.0f} ({q1:,.0f}–{q3:,.0f})"
     return f"{med:.1f} ({q1:.1f}–{q3:.1f})"
-
-
+ 
+ 
 def summarize_continuous(df: pd.DataFrame, col: str) -> dict:
     s = df[col]
     n_valid = s.notna().sum()
@@ -113,8 +138,8 @@ def summarize_continuous(df: pd.DataFrame, col: str) -> dict:
         "statistic": _fmt_median_iqr(s),
         "missing_pct": f"{(n_total - n_valid) / n_total * 100:.1f}%",
     }
-
-
+ 
+ 
 def summarize_binary(df: pd.DataFrame, col: str) -> dict:
     s = df[col]
     n_valid = s.notna().sum()
@@ -125,15 +150,21 @@ def summarize_binary(df: pd.DataFrame, col: str) -> dict:
         "statistic": _fmt_n_pct(n_yes, n_valid),
         "missing_pct": f"{(n_total - n_valid) / n_total * 100:.1f}%",
     }
-
-
-def summarize_categorical(df: pd.DataFrame, col: str) -> list[dict]:
+ 
+ 
+def summarize_categorical(df: pd.DataFrame, col: str,
+                          order: list | None = None) -> list[dict]:
     """Return one row per category."""
     s = df[col]
     n_valid = s.notna().sum()
     n_total = len(s)
     rows = []
-    counts = s.value_counts(dropna=True).sort_index()
+    counts = s.value_counts(dropna=True)
+    # Use caller-supplied order when available, otherwise sort index
+    if order is not None:
+        counts = counts.reindex([c for c in order if c in counts.index]).fillna(0)
+    else:
+        counts = counts.sort_index()
     for cat, n in counts.items():
         rows.append({
             "category": str(cat),
@@ -142,20 +173,35 @@ def summarize_categorical(df: pd.DataFrame, col: str) -> list[dict]:
             "missing_pct": f"{(n_total - n_valid) / n_total * 100:.1f}%",
         })
     return rows
-
+ 
 def brfss_diabetes_module_subset(df: pd.DataFrame) -> pd.DataFrame:
     """Return the subset of BRFSS respondents who were asked the diabetes
-    self-management module (Maine + New Hampshire only in 2023).
+    self-management module (states that ran Module 2 in 2023).
     """
     if "preventive_care_eligible" in df.columns:
         return df.loc[df["preventive_care_eligible"] == 1].copy()
     # Fallback if the eligible flag is missing
     return df.loc[df["state_name"].isin(["Maine", "New Hampshire"])].copy()
-
+ 
+ 
+def brfss_sdoh_subset(df: pd.DataFrame) -> pd.DataFrame:
+    """Return the subset of BRFSS respondents who were asked the Social
+    Determinants module (Module 29). Scopes SDOH analyses to respondents
+    with complete data on all four hardship items.
+    """
+    if "sdoh_eligible" in df.columns:
+        return df.loc[df["sdoh_eligible"] == 1].copy()
+    # Fallback: require non-missing on at least one SDOH item
+    sdoh_cols = ["food_insecure", "housing_cost_burden", "transport_barrier"]
+    available = [c for c in sdoh_cols if c in df.columns]
+    if available:
+        return df.loc[df[available].notna().any(axis=1)].copy()
+    return df.copy()
+ 
 # ===========================================================================
 # Table A — all-sample summary
 # ===========================================================================
-
+ 
 def build_table_a(df: pd.DataFrame, vars_dict: dict, dataset_label: str = "") -> pd.DataFrame:
     """All-sample descriptive table.
     
@@ -174,10 +220,10 @@ def build_table_a(df: pd.DataFrame, vars_dict: dict, dataset_label: str = "") ->
                 "Missing %": "100.0%",
             })
             continue
-
+ 
         vtype = spec["type"]
         label = spec["label"]
-
+ 
         if vtype == "continuous":
             s = summarize_continuous(df, col)
             rows.append({
@@ -197,7 +243,12 @@ def build_table_a(df: pd.DataFrame, vars_dict: dict, dataset_label: str = "") ->
                 "Missing %": s["missing_pct"],
             })
         elif vtype == "categorical":
-            cat_rows = summarize_categorical(df, col)
+            # Respect Pandas Categorical ordering when present; fall back to sorted()
+            if hasattr(df[col], "cat") and df[col].cat.ordered:
+                cat_rows = summarize_categorical(df, col,
+                               order=list(df[col].cat.categories))
+            else:
+                cat_rows = summarize_categorical(df, col)
             for i, cr in enumerate(cat_rows):
                 rows.append({
                     "Variable": label if i == 0 else "",
@@ -206,17 +257,17 @@ def build_table_a(df: pd.DataFrame, vars_dict: dict, dataset_label: str = "") ->
                     "Statistic": cr["statistic"],
                     "Missing %": cr["missing_pct"] if i == 0 else "",
                 })
-
+ 
     table = pd.DataFrame(rows)
     if dataset_label:
         table.attrs["dataset"] = dataset_label
     return table
-
-
+ 
+ 
 # ===========================================================================
 # Statistical tests for Table B
 # ===========================================================================
-
+ 
 def _test_continuous(df: pd.DataFrame, col: str, group_col: str) -> tuple[str, float]:
     """Mann-Whitney U for 2 groups; Kruskal-Wallis for 3+. Returns (test_name, p)."""
     groups = []
@@ -232,8 +283,8 @@ def _test_continuous(df: pd.DataFrame, col: str, group_col: str) -> tuple[str, f
     else:
         _, p = stats.kruskal(*groups)
         return ("Kruskal-Wallis", p)
-
-
+ 
+ 
 def _test_categorical(df: pd.DataFrame, col: str, group_col: str) -> tuple[str, float]:
     """Chi-square test of independence. Returns (test_name, p)."""
     valid = df[[col, group_col]].dropna()
@@ -244,20 +295,20 @@ def _test_categorical(df: pd.DataFrame, col: str, group_col: str) -> tuple[str, 
         return ("—", np.nan)
     chi2, p, _, _ = stats.chi2_contingency(table)
     return ("Chi-square", p)
-
-
+ 
+ 
 def _format_p(p: float) -> str:
     if pd.isna(p):
         return "—"
     if p < 0.001:
         return "<0.001"
     return f"{p:.3f}"
-
-
+ 
+ 
 # ===========================================================================
 # Table B — stratified by sub-group
 # ===========================================================================
-
+ 
 def build_table_b(
     df: pd.DataFrame,
     vars_dict: dict,
@@ -266,18 +317,18 @@ def build_table_b(
     dataset_label: str = "",
 ) -> pd.DataFrame:
     """Stratified descriptive table with statistical tests.
-
+ 
     Returns a DataFrame with columns:
       Variable, Category, Overall, <group1>, <group2>, ..., Test, p-value
     """
     if group_col not in df.columns:
         raise KeyError(f"Group column '{group_col}' not in dataframe")
-
+ 
     group_label = group_label or group_col
     groups = sorted([g for g in df[group_col].dropna().unique()])
     n_overall = len(df)
     n_by_group = df[group_col].value_counts().to_dict()
-
+ 
     # Build header row showing group sizes
     rows = []
     header_row = {
@@ -290,14 +341,14 @@ def build_table_b(
     header_row["Test"] = ""
     header_row["p-value"] = ""
     rows.append(header_row)
-
+ 
     for col, spec in vars_dict.items():
         if col not in df.columns or col == group_col:
             continue
-
+ 
         vtype = spec["type"]
         label = spec["label"]
-
+ 
         if vtype == "continuous":
             test_name, p = _test_continuous(df, col, group_col)
             row = {
@@ -311,7 +362,7 @@ def build_table_b(
             row["Test"] = test_name
             row["p-value"] = _format_p(p)
             rows.append(row)
-
+ 
         elif vtype == "binary":
             test_name, p = _test_categorical(df, col, group_col)
             n_valid_overall = df[col].notna().sum()
@@ -329,10 +380,14 @@ def build_table_b(
             row["Test"] = test_name
             row["p-value"] = _format_p(p)
             rows.append(row)
-
+ 
         elif vtype == "categorical":
             test_name, p = _test_categorical(df, col, group_col)
-            cats = sorted(df[col].dropna().unique())
+            # Respect Pandas Categorical ordering when present; fall back to sorted()
+            if hasattr(df[col], "cat") and df[col].cat.ordered:
+                cats = list(df[col].cat.categories)
+            else:
+                cats = sorted(df[col].dropna().unique())
             n_valid_overall = df[col].notna().sum()
             for i, cat in enumerate(cats):
                 row = {
@@ -348,7 +403,7 @@ def build_table_b(
                 row["Test"] = test_name if i == 0 else ""
                 row["p-value"] = _format_p(p) if i == 0 else ""
                 rows.append(row)
-
+ 
     table = pd.DataFrame(rows)
     # Rename group columns to be more readable
     table.columns = [
@@ -359,12 +414,12 @@ def build_table_b(
         table.attrs["dataset"] = dataset_label
         table.attrs["group_col"] = group_col
     return table
-
-
+ 
+ 
 # ===========================================================================
 # Excel export with formatting
 # ===========================================================================
-
+ 
 def save_table(table: pd.DataFrame, output_path, sheet_name: str = "Table") -> None:
     """Save a descriptive table to Excel with reasonable column widths."""
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
