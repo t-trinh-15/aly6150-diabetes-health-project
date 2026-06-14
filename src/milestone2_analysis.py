@@ -61,7 +61,7 @@ from src.config import (
 
 # Shared chart styling, matching src/visualization.py so Milestone 1 and 2
 # figures look consistent in the final report.
-sns.set_style("whitegrid")
+sns.set_style("white")
 plt.rcParams.update({
     "figure.dpi": 100,
     "savefig.dpi": 300,
@@ -72,6 +72,9 @@ plt.rcParams.update({
     "axes.labelsize": 11,
     "axes.spines.top": False,
     "axes.spines.right": False,
+    "axes.grid": False,
+    "xtick.bottom": False,
+    "ytick.left": False,
 })
 
 
@@ -672,7 +675,6 @@ def forest_plot_or(or_table: pd.DataFrame, output_dir: Path = OUTPUT_FIGURES,
     ax.set_yticklabels(d["_label"], fontsize=10)
     ax.set_xlabel("Adjusted odds ratio (log scale)  —  values >1 indicate higher risk", fontsize=11)
     ax.set_title(title + "\nBRFSS 2023, diabetic adults 45–64", loc="left", fontsize=13)
-    ax.grid(axis="x", linestyle=":", alpha=0.5)
 
     legend_patches = [
         mpatches.Patch(color="#c0392b",  label="Insurance status"),
@@ -685,6 +687,8 @@ def forest_plot_or(or_table: pd.DataFrame, output_dir: Path = OUTPUT_FIGURES,
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / filename
+    sns.despine(ax=ax)
+    ax.grid(False)
     fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return path
@@ -728,11 +732,12 @@ def roc_curves(roc_data: dict, output_dir: Path = OUTPUT_FIGURES,
     ax.legend(loc="lower right", fontsize=10)
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1.02)
-    ax.grid(linestyle=":", alpha=0.4)
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / filename
+    sns.despine(ax=ax)
+    ax.grid(False)
     fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return path
@@ -768,11 +773,12 @@ def importance_plot(gb_importance: pd.DataFrame, output_dir: Path = OUTPUT_FIGUR
         loc="left", fontsize=13,
     )
     ax.set_xlim(0, d["Importance"].max() * 1.18)
-    ax.grid(axis="x", linestyle=":", alpha=0.4)
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / filename
+    sns.despine(ax=ax)
+    ax.grid(False)
     fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return path
@@ -795,38 +801,62 @@ def lineplot_missed_care_trend(trend: pd.DataFrame | None = None,
     if trend is None:
         trend = pd.read_csv(OUTPUT_TABLES / "m2_missed_care_trend.csv")
 
-    fig, ax = plt.subplots(figsize=(9, 6))
-    colors = {"United States": "#5d8aa8", "New England": "#c0392b"}
+    colors = {"United States": "#3a7ca5", "New England": "#c0392b"}
+    fig, ax = plt.subplots(figsize=(10, 6.5))
+
     for region, sub in trend.groupby("region"):
         sub = sub.sort_values("year")
-        ax.plot(sub["year"], sub["missed_care_rate_pct"], marker="o",
-                linewidth=2.4, markersize=7, label=region,
-                color=colors.get(region))
+        col = colors.get(region, "#555555")
+        ax.plot(sub["year"], sub["missed_care_rate_pct"],
+                marker="o", linewidth=2.6, markersize=8,
+                label=region, color=col, zorder=3)
+
+        # Alternate annotation offsets so US and NE labels don't collide
         for _, r in sub.iterrows():
-            ax.annotate(f"{r['missed_care_rate_pct']:.1f}%",
-                        (r["year"], r["missed_care_rate_pct"]),
-                        textcoords="offset points", xytext=(0, 9),
-                        ha="center", fontsize=8, fontweight="bold")
+            offset = 10 if region == "United States" else -16
+            ax.annotate(
+                f"{r['missed_care_rate_pct']:.1f}%",
+                (r["year"], r["missed_care_rate_pct"]),
+                textcoords="offset points", xytext=(0, offset),
+                ha="center", fontsize=10, fontweight="bold", color=col,
+            )
+
+    # Shade the gap between the two lines
+    us  = trend[trend["region"] == "United States"].sort_values("year")
+    ne  = trend[trend["region"] == "New England"].sort_values("year")
+    if len(us) == len(ne):
+        ax.fill_between(us["year"], ne["missed_care_rate_pct"],
+                        us["missed_care_rate_pct"],
+                        alpha=0.08, color="#3a7ca5",
+                        label="Gap (NE below U.S.)")
+
+    # COVID annotation
+    ax.axvline(2020, color="#888888", linestyle=":", linewidth=1.4, zorder=2)
+    ax.text(2020.05, trend["missed_care_rate_pct"].max() * 1.15,
+            "COVID-19\ndisruption (2020)",
+            fontsize=9, color="#888888", ha="left", va="top",
+            bbox=dict(boxstyle="round,pad=0.3", fc="white",
+                      ec="#888888", alpha=0.7))
 
     ax.set_xticks(sorted(trend["year"].unique()))
-    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.0f}%"))
-    ax.set_ylim(0, trend["missed_care_rate_pct"].max() * 1.25)
-    ax.set_ylabel("Missed care due to cost (past 12 months)")
-    ax.set_xlabel("BRFSS survey year")
-    ax.legend(title="Sample", framealpha=0.9)
+    ax.yaxis.set_major_formatter(
+        mticker.FuncFormatter(lambda x, _: f"{x:.0f}%"))
+    ax.set_ylim(0, trend["missed_care_rate_pct"].max() * 1.30)
+    ax.set_ylabel("Adults who skipped care due to cost (past 12 months)",
+                  fontsize=12)
+    ax.set_xlabel("BRFSS survey year", fontsize=12)
+    ax.legend(title="Sample", fontsize=11, title_fontsize=11)
     ax.set_title(
         "Missed care due to cost among diabetic adults 45–64, 2019–2023\n"
         "BRFSS annual files, unweighted — U.S. vs New England",
-        loc="left",
+        loc="left", fontsize=13,
     )
-    # 2020 saw pandemic-related BRFSS data-collection disruptions; flag it.
-    ax.axvline(2020, color="grey", linestyle=":", linewidth=1)
-    ax.text(2020, ax.get_ylim()[1] * 0.97, " COVID-19 (2020)",
-            fontsize=8, color="grey", ha="left", va="top")
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / filename
+    sns.despine(ax=ax)
+    ax.grid(False)
     fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return path
@@ -890,11 +920,12 @@ def curve_missed_care_vs_comorbidity(brfss: pd.DataFrame,
         loc="left", fontsize=13,
     )
     ax.legend(title="Insurance status", fontsize=11)
-    ax.grid(linestyle=":", alpha=0.4)
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / filename
+    sns.despine(ax=ax)
+    ax.grid(False)
     fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return path
@@ -946,11 +977,12 @@ def curve_high_spender_vs_rx(meps: pd.DataFrame,
         loc="left", fontsize=13,
     )
     ax.set_ylim(0, 1)
-    ax.grid(linestyle=":", alpha=0.4)
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / filename
+    sns.despine(ax=ax)
+    ax.grid(False)
     fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     return path
