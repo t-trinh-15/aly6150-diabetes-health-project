@@ -597,24 +597,90 @@ def map_missed_care_by_state(brfss: pd.DataFrame, output_dir: Path = OUTPUT_FIGU
     return path
 
 
+# Plain-English label map for forest plot predictor names
+_FOREST_LABELS = {
+    "uninsured":                                        "Uninsured (vs. insured)",
+    "is_low_income":                                    "Low income",
+    "poor_health":                                      "Poor self-rated health",
+    "comorbidity_count":                                "Each additional chronic condition",
+    "age_band_collapsed: 55-64":                        "Age 55–64 (vs. 45–54)",
+    "sex_label: Male":                                  "Male (vs. female)",
+    "race_group (ref NH White): Hispanic":              "Hispanic (vs. NH White)",
+    "race_group (ref NH White): NH Black":              "NH Black (vs. NH White)",
+    "race_group (ref NH White): Other":                 "Other race/ethnicity (vs. NH White)",
+    "state_name (ref Massachusetts): Alabama":          "Alabama (vs. Massachusetts)",
+    "state_name (ref Massachusetts): Arkansas":         "Arkansas (vs. Massachusetts)",
+    "state_name (ref Massachusetts): Connecticut":      "Connecticut (vs. Massachusetts)",
+    "state_name (ref Massachusetts): Louisiana":        "Louisiana (vs. Massachusetts)",
+    "state_name (ref Massachusetts): Maine":            "Maine (vs. Massachusetts)",
+    "state_name (ref Massachusetts): Mississippi":      "Mississippi (vs. Massachusetts)",
+    "state_name (ref Massachusetts): New Hampshire":    "New Hampshire (vs. Massachusetts)",
+    "state_name (ref Massachusetts): Rhode Island":     "Rhode Island (vs. Massachusetts)",
+    "state_name (ref Massachusetts): Vermont":          "Vermont (vs. Massachusetts)",
+    "state_name (ref Massachusetts): West Virginia":    "West Virginia (vs. Massachusetts)",
+}
+
+# Plain-English label map for feature importance names
+_FEATURE_LABELS = {
+    "n_rx_fills":                       "Prescription fills",
+    "n_inpatient_stays":                "Inpatient hospital stays",
+    "age":                              "Age",
+    "n_er_visits":                      "Emergency room visits",
+    "insurance_label_Uninsured":        "Uninsured status",
+    "race_ethnicity_NH White":          "Race: NH White",
+    "comorbidity_count":                "Number of chronic conditions",
+    "race_ethnicity_NH Asian":          "Race: NH Asian",
+    "sex_label_Male":                   "Sex: Male",
+    "race_ethnicity_NH Other/Multiple": "Race: Other/Multiple",
+}
+
+
 def forest_plot_or(or_table: pd.DataFrame, output_dir: Path = OUTPUT_FIGURES,
                    title: str = "Adjusted odds ratios — missed care due to cost",
                    filename: str = "m2_forest_missed_care.png") -> Path:
-    """Forest plot of adjusted odds ratios (with 95% CIs) on a log axis."""
-    d = or_table.dropna(subset=["_or"]).iloc[::-1].reset_index(drop=True)
-    fig, ax = plt.subplots(figsize=(9, max(4, 0.5 * len(d))))
+    """Forest plot of adjusted odds ratios with plain-English labels,
+    colour-coded by predictor type, and OR values annotated on each row.
+    """
+    import matplotlib.patches as mpatches
 
+    d = or_table.dropna(subset=["_or"]).copy()
+    d["_label"] = d["Predictor"].map(lambda x: _FOREST_LABELS.get(str(x), str(x)))
+
+    def _color(label: str) -> str:
+        if "Uninsured" in label:
+            return "#c0392b"
+        if "Low income" in label or "Poor self-rated" in label:
+            return "#e67e22"
+        return "#1a2f45"
+
+    d["_color"] = d["_label"].apply(_color)
+    d = d.iloc[::-1].reset_index(drop=True)
+
+    fig, ax = plt.subplots(figsize=(11, max(5, 0.52 * len(d))))
     y = np.arange(len(d))
-    ax.errorbar(d["_or"], y,
-                xerr=[d["_or"] - d["_lo"], d["_hi"] - d["_or"]],
-                fmt="o", color="#2c3e50", ecolor="#5d8aa8",
-                elinewidth=2, capsize=4, markersize=7)
-    ax.axvline(1.0, color="#c0392b", linestyle="--", linewidth=1.2)
-    ax.set_yticks(y)
-    ax.set_yticklabels(d["Predictor"], fontsize=9)
+
+    for i, row in d.iterrows():
+        ax.plot(row["_or"], i, "o", color=row["_color"], markersize=8, zorder=3)
+        ax.plot([row["_lo"], row["_hi"]], [i, i],
+                color=row["_color"], linewidth=2, alpha=0.7, zorder=2)
+        ax.text(row["_hi"] * 1.05, i, f'{row["_or"]:.2f}',
+                va="center", ha="left", fontsize=9, color=row["_color"])
+
+    ax.axvline(1.0, color="#c0392b", linestyle="--", linewidth=1.4, alpha=0.8)
     ax.set_xscale("log")
-    ax.set_xlabel("Adjusted odds ratio (log scale)")
-    ax.set_title(title, loc="left")
+    ax.set_yticks(y)
+    ax.set_yticklabels(d["_label"], fontsize=10)
+    ax.set_xlabel("Adjusted odds ratio (log scale)  —  values >1 indicate higher risk", fontsize=11)
+    ax.set_title(title + "\nBRFSS 2023, diabetic adults 45–64", loc="left", fontsize=13)
+    ax.grid(axis="x", linestyle=":", alpha=0.5)
+
+    legend_patches = [
+        mpatches.Patch(color="#c0392b",  label="Insurance status"),
+        mpatches.Patch(color="#e67e22",  label="Socioeconomic factors"),
+        mpatches.Patch(color="#1a2f45",  label="Demographics / health"),
+    ]
+    ax.legend(handles=legend_patches, loc="lower right", fontsize=10)
+    fig.tight_layout()
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -626,19 +692,43 @@ def forest_plot_or(or_table: pd.DataFrame, output_dir: Path = OUTPUT_FIGURES,
 
 def roc_curves(roc_data: dict, output_dir: Path = OUTPUT_FIGURES,
                filename: str = "m2_roc_high_spender.png") -> Path:
-    """Overlay ROC curves for the high-spender classifiers."""
-    fig, ax = plt.subplots(figsize=(7, 7))
-    palette = {"Logistic regression": "#2c3e50",
+    """Overlay ROC curves with AUC annotated directly on each curve
+    and a shaded region under the best model.
+    """
+    palette = {"Logistic regression": "#1a2f45",
                "LASSO logistic (L1)": "#16a085",
-               "Gradient boosting": "#c0392b"}
+               "Gradient boosting":   "#c0392b"}
+    fig, ax = plt.subplots(figsize=(7, 7))
+
+    best_name = max(roc_data, key=lambda k: roc_data[k][2])
+    best_fpr, best_tpr, _ = roc_data[best_name]
+    ax.fill_between(best_fpr, best_fpr, best_tpr, alpha=0.07,
+                    color=palette[best_name])
+
     for name, (fpr, tpr, auc) in roc_data.items():
-        ax.plot(fpr, tpr, label=f"{name} (AUC={auc:.3f})",
-                color=palette.get(name), linewidth=2)
-    ax.plot([0, 1], [0, 1], color="grey", linestyle="--", linewidth=1)
-    ax.set_xlabel("False positive rate")
-    ax.set_ylabel("True positive rate")
-    ax.set_title("ROC curves — predicting high-spender status (MEPS)", loc="left")
-    ax.legend(loc="lower right", framealpha=0.9)
+        ax.plot(fpr, tpr, color=palette[name], linewidth=2.5,
+                label=f"{name}  (AUC = {auc:.3f})")
+        idx = np.searchsorted(fpr, 0.38)
+        ax.annotate(
+            f"AUC = {auc:.3f}",
+            xy=(fpr[idx], tpr[idx]),
+            xytext=(fpr[idx] + 0.04, tpr[idx] - 0.06),
+            fontsize=9.5, color=palette[name], fontweight="bold",
+            arrowprops=dict(arrowstyle="-", color=palette[name], lw=0.8),
+        )
+
+    ax.plot([0, 1], [0, 1], color="grey", linestyle="--",
+            linewidth=1.2, label="Random classifier (AUC = 0.500)")
+    ax.set_xlabel("False positive rate  (1 – Specificity)", fontsize=12)
+    ax.set_ylabel("True positive rate  (Sensitivity)", fontsize=12)
+    ax.set_title(
+        "Predicting high-spender status — model comparison\nMEPS 2023, diabetic adults 45–64",
+        loc="left", fontsize=13,
+    )
+    ax.legend(loc="lower right", fontsize=10)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1.02)
+    ax.grid(linestyle=":", alpha=0.4)
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -650,12 +740,35 @@ def roc_curves(roc_data: dict, output_dir: Path = OUTPUT_FIGURES,
 
 def importance_plot(gb_importance: pd.DataFrame, output_dir: Path = OUTPUT_FIGURES,
                     filename: str = "m2_gb_importance.png") -> Path:
-    """Horizontal bar of gradient-boosting feature importances."""
-    d = gb_importance.head(10).iloc[::-1]
-    fig, ax = plt.subplots(figsize=(8, 6))
-    ax.barh(d["Feature"], d["Importance"], color="#5d8aa8", edgecolor="white")
-    ax.set_xlabel("Gradient-boosting feature importance")
-    ax.set_title("What predicts high-spender status? (MEPS)", loc="left")
+    """Horizontal bar of gradient-boosting feature importances with
+    plain-English names, value annotations, and a blue colour gradient.
+    """
+    d = gb_importance.head(10).copy()
+    d["_label"] = d["Feature"].map(lambda x: _FEATURE_LABELS.get(str(x), str(x)))
+    d = d.sort_values("Importance", ascending=True).reset_index(drop=True)
+
+    norm = plt.Normalize(d["Importance"].min(), d["Importance"].max())
+    colors = plt.cm.Blues(norm(d["Importance"]) * 0.7 + 0.25)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    bars = ax.barh(d["_label"], d["Importance"], color=colors,
+                   edgecolor="white", height=0.65)
+
+    for bar, val in zip(bars, d["Importance"]):
+        ax.text(val + 0.003, bar.get_y() + bar.get_height() / 2,
+                f"{val:.3f}", va="center", ha="left", fontsize=10,
+                color="#555555")
+
+    ax.set_xlabel(
+        "Gradient-boosting feature importance\n"
+        "(higher = stronger predictor of high healthcare spending)", fontsize=11)
+    ax.set_title(
+        "What drives high healthcare spending?\n"
+        "MEPS 2023, gradient-boosted model — top 10 predictors",
+        loc="left", fontsize=13,
+    )
+    ax.set_xlim(0, d["Importance"].max() * 1.18)
+    ax.grid(axis="x", linestyle=":", alpha=0.4)
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -722,9 +835,9 @@ def lineplot_missed_care_trend(trend: pd.DataFrame | None = None,
 def curve_missed_care_vs_comorbidity(brfss: pd.DataFrame,
                                      output_dir: Path = OUTPUT_FIGURES,
                                      filename: str = "m2_curve_missed_care.png") -> Path:
-    """Model-based line chart: predicted probability of missing care due to
-    cost as a function of comorbidity burden, separately for insured vs
-    uninsured adults (logistic model with an interaction).
+    """Predicted missed-care probability by comorbidity burden and insurance,
+    with gap shading, % annotations on every other point, and a callout
+    showing the gap size at comorbidity count = 4.
     """
     d = brfss.dropna(subset=["missed_care_cost", "comorbidity_count", "uninsured"]).copy()
     d["missed_care_cost"] = d["missed_care_cost"].astype(int)
@@ -732,23 +845,52 @@ def curve_missed_care_vs_comorbidity(brfss: pd.DataFrame,
         "missed_care_cost ~ comorbidity_count * uninsured", data=d).fit(disp=0)
 
     grid = pd.DataFrame({"comorbidity_count": range(0, 9)})
-    fig, ax = plt.subplots(figsize=(9, 6))
-    for u, lab, col in [(0, "Insured", "#5b8b9e"), (1, "Uninsured", "#c0392b")]:
+    fig, ax = plt.subplots(figsize=(10, 6.5))
+
+    lines = {}
+    for u, lab, col in [(0, "Insured", "#3a7ca5"), (1, "Uninsured", "#c0392b")]:
         g = grid.copy()
         g["uninsured"] = u
         g["p"] = res.predict(g)
-        ax.plot(g["comorbidity_count"], g["p"], marker="o", linewidth=2.4,
-                markersize=6, label=lab, color=col)
+        lines[lab] = g
+        ax.plot(g["comorbidity_count"], g["p"], marker="o", linewidth=2.6,
+                markersize=7, label=lab, color=col)
+        for _, r in g.iterrows():
+            if r["comorbidity_count"] % 2 == 0:
+                offset = 10 if u == 1 else -14
+                ax.annotate(f"{r['p']:.0%}",
+                            xy=(r["comorbidity_count"], r["p"]),
+                            xytext=(0, offset), textcoords="offset points",
+                            ha="center", fontsize=8.5, color=col, fontweight="bold")
+
+    ax.fill_between(
+        lines["Insured"]["comorbidity_count"],
+        lines["Insured"]["p"],
+        lines["Uninsured"]["p"],
+        alpha=0.08, color="#c0392b", label="Gap (insurance effect)",
+    )
+
+    pt_ins   = float(lines["Insured"].loc[lines["Insured"]["comorbidity_count"] == 4, "p"].iloc[0])
+    pt_unins = float(lines["Uninsured"].loc[lines["Uninsured"]["comorbidity_count"] == 4, "p"].iloc[0])
+    ax.annotate(
+        f"Gap at 4 conditions:\n{pt_unins:.0%} vs {pt_ins:.0%}",
+        xy=(4, (pt_ins + pt_unins) / 2),
+        xytext=(5.5, (pt_ins + pt_unins) / 2),
+        fontsize=10, color="#555555",
+        arrowprops=dict(arrowstyle="->", color="#555555", lw=1),
+        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#555555", alpha=0.8),
+    )
 
     ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
-    ax.set_xlabel("Comorbidity count (chronic conditions on top of diabetes)")
-    ax.set_ylabel("Predicted probability of missing care due to cost")
-    ax.legend(title="Insurance status", framealpha=0.9)
+    ax.set_xlabel("Number of chronic conditions (in addition to diabetes)", fontsize=12)
+    ax.set_ylabel("Predicted probability of skipping care due to cost", fontsize=12)
     ax.set_title(
-        "Predicted missed-care risk by comorbidity burden and insurance\n"
-        "BRFSS 2023, diabetic adults 45–64 — logistic model",
-        loc="left",
+        "Uninsured diabetic adults face sharply higher missed-care risk\n"
+        "BRFSS 2023, adults 45–64 — logistic model with insurance × comorbidity interaction",
+        loc="left", fontsize=13,
     )
+    ax.legend(title="Insurance status", fontsize=11)
+    ax.grid(linestyle=":", alpha=0.4)
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -761,8 +903,9 @@ def curve_missed_care_vs_comorbidity(brfss: pd.DataFrame,
 def curve_high_spender_vs_rx(meps: pd.DataFrame,
                              output_dir: Path = OUTPUT_FIGURES,
                              filename: str = "m2_curve_high_spender.png") -> Path:
-    """Model-based line chart: predicted probability of being a high spender
-    as a function of the number of prescription fills (the top predictor).
+    """Predicted high-spender probability vs prescription fills, with
+    shaded area under the curve, a rug of observed counts, and 25%/50%
+    risk milestone annotations.
     """
     d = meps.dropna(subset=["high_spender", "n_rx_fills"]).copy()
     res = sm.Logit.from_formula("high_spender ~ n_rx_fills", data=d).fit(disp=0)
@@ -771,19 +914,39 @@ def curve_high_spender_vs_rx(meps: pd.DataFrame,
     grid = pd.DataFrame({"n_rx_fills": range(0, hi + 1)})
     grid["p"] = res.predict(grid)
 
-    fig, ax = plt.subplots(figsize=(9, 6))
-    ax.plot(grid["n_rx_fills"], grid["p"], color="#2c3e50", linewidth=2.6)
-    # Light rug of observed fill counts for context.
-    ax.plot(d["n_rx_fills"].clip(upper=hi), [0.02] * len(d), "|",
-            color="#85b8d8", alpha=0.3, markersize=8)
+    fig, ax = plt.subplots(figsize=(10, 6.5))
+    ax.fill_between(grid["n_rx_fills"], 0, grid["p"], alpha=0.10, color="#1a2f45")
+    ax.plot(grid["n_rx_fills"], grid["p"], color="#1a2f45", linewidth=2.8)
+    ax.plot(d["n_rx_fills"].clip(upper=hi), [0.015] * len(d),
+            "|", color="#3a7ca5", alpha=0.25, markersize=8)
+
+    for target_p, label_offset in [(0.25, 8), (0.50, 8)]:
+        match = grid[grid["p"] >= target_p]
+        if not match.empty:
+            x_cross = int(match.iloc[0]["n_rx_fills"])
+            ax.axvline(x_cross, color="#555555", linestyle=":", linewidth=1.2, alpha=0.7)
+            ax.axhline(target_p, color="#555555", linestyle=":", linewidth=1.2, alpha=0.7)
+            ax.annotate(
+                f"{target_p:.0%} risk\nat {x_cross} fills",
+                xy=(x_cross, target_p),
+                xytext=(x_cross + label_offset, target_p - 0.07),
+                fontsize=9.5, color="#555555",
+                arrowprops=dict(arrowstyle="->", color="#555555", lw=0.9),
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#555555", alpha=0.8),
+            )
+
     ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
-    ax.set_xlabel("Number of prescription fills in 2023")
-    ax.set_ylabel("Predicted probability of high-spender status")
+    ax.set_xlabel("Number of prescription fills in 2023", fontsize=12)
+    ax.set_ylabel(
+        "Predicted probability of high-spender status\n"
+        "(≥75th percentile of total medical expenses)", fontsize=11)
     ax.set_title(
-        "Predicted high-spender risk rises with prescription fills\n"
+        "High-prescription patients face rapidly rising spending risk\n"
         "MEPS 2023, diabetic adults 45–64 — logistic model",
-        loc="left",
+        loc="left", fontsize=13,
     )
+    ax.set_ylim(0, 1)
+    ax.grid(linestyle=":", alpha=0.4)
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
