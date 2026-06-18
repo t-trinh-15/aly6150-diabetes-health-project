@@ -50,6 +50,7 @@ from sklearn.metrics import classification_report, roc_auc_score, roc_curve
 from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from statsmodels.stats.weightstats import DescrStatsW
 
 # Reuse the central path configuration from Milestone 1 (read-only import).
 from src.config import (
@@ -82,11 +83,12 @@ plt.rcParams.update({
 # 0. External state-level reference data  (the "additional merged dataset")
 # ===========================================================================
 # Milestone 2 asks us to "merge additional data set if possible (population,
-# ... etc.)". Because the BRFSS analytic file is restricted to the six New
-# England states, we attach a small, curated state-level table drawn from
-# published U.S. Census Bureau sources. This lets us (a) compute population
-# context and (b) test whether STATE-LEVEL affluence (median household income)
-# tracks the BRFSS missed-care-due-to-cost rate (an ecological comparison).
+# ... etc.)". Because the BRFSS analytic file covers eleven states across two
+# regions (six New England states and five lower-income Southern states), we
+# attach a small, curated state-level table drawn from published U.S. Census
+# Bureau sources. This lets us (a) compute population context and (b) verify
+# that STATE-LEVEL affluence (median household income) differs meaningfully
+# between the two regions, supporting the "lower-income South" label.
 #
 # Figures are approximate 2023 American Community Survey (ACS) 1-year
 # estimates and Census population estimates, rounded for readability.
@@ -95,16 +97,65 @@ plt.rcParams.update({
 # page. They are used here only as contextual covariates, not as outcomes.
 STATE_CONTEXT = pd.DataFrame([
     # state_name,       abbr, population_2023, median_hh_income_2023, uninsured_rate_pct_2023
-    ("Connecticut",     "CT", 3_617_000, 93_760,  5.5),
-    ("Maine",           "ME", 1_402_000, 73_733,  5.7),
-    ("Massachusetts",   "MA", 7_001_000, 101_341, 2.4),
-    ("New Hampshire",   "NH", 1_403_000, 96_838,  5.8),
-    ("Rhode Island",    "RI", 1_096_000, 84_972,  4.0),
-    ("Vermont",         "VT", 647_000,   81_211,  3.8),
+    # -- New England --
+    ("Connecticut",     "CT", 3_617_000,  93_760,  5.5),
+    ("Maine",           "ME", 1_402_000,  73_733,  5.7),
+    ("Massachusetts",   "MA", 7_001_000, 101_341,  2.4),
+    ("New Hampshire",   "NH", 1_403_000,  96_838,  5.8),
+    ("Rhode Island",    "RI", 1_096_000,  84_972,  4.0),
+    ("Vermont",         "VT",   647_000,  81_211,  3.8),
+    # -- Lower-income South --
+    ("Alabama",         "AL", 5_108_000,  58_370, 10.1),
+    ("Arkansas",        "AR", 3_067_000,  56_335, 10.7),
+    ("Louisiana",       "LA", 4_590_000,  57_852, 11.0),
+    ("Mississippi",     "MS", 2_940_000,  52_985, 13.6),
+    ("West Virginia",   "WV", 1_770_000,  55_217, 10.3),
 ], columns=[
     "state_name", "state_abbr", "population_2023",
     "median_hh_income_2023", "uninsured_rate_pct_2023",
 ])
+# Source: U.S. Census Bureau, American Community Survey 1-Year Estimates 2023.
+# Retrieved from data.census.gov. Median household income in 2023 inflation-
+# adjusted dollars. Uninsured rate = % of civilian noninstitutionalized population.
+
+
+def acs_region_comparison() -> pd.DataFrame:
+    """Return a region-level ACS summary table verifying the 'lower-income
+    South' label used to select the five comparison states.
+
+    Aggregates STATE_CONTEXT by region, computing population-weighted mean
+    household income and mean uninsured rate. Saved to outputs/tables/ when
+    called from run_all().
+    """
+    region_map = {
+        "Connecticut": "New England",   "Maine": "New England",
+        "Massachusetts": "New England", "New Hampshire": "New England",
+        "Rhode Island": "New England",  "Vermont": "New England",
+        "Alabama": "Lower-income South", "Arkansas": "Lower-income South",
+        "Louisiana": "Lower-income South", "Mississippi": "Lower-income South",
+        "West Virginia": "Lower-income South",
+    }
+    df = STATE_CONTEXT.copy()
+    df["region"] = df["state_name"].map(region_map)
+
+    summary = (
+        df.groupby("region")
+          .apply(lambda g: pd.Series({
+              "States": ", ".join(g["state_abbr"]),
+              "Total population": f"{g['population_2023'].sum():,}",
+              "Median HH income (pop-wtd avg, $)":
+                  int(np.average(g["median_hh_income_2023"],
+                                 weights=g["population_2023"])),
+              "Uninsured rate (mean %)":
+                  round(g["uninsured_rate_pct_2023"].mean(), 1),
+          }))
+          .reset_index()
+    )
+    summary.attrs["source"] = (
+        "U.S. Census Bureau, American Community Survey 1-Year Estimates, 2023. "
+        "Retrieved from data.census.gov."
+    )
+    return summary
 
 
 # ===========================================================================
@@ -210,7 +261,7 @@ def run_hypothesis_tests(meps: pd.DataFrame, brfss: pd.DataFrame) -> pd.DataFram
     chi2, p, dof = _chi2(d, "missed_care_cost", "state_name")
     rows.append({
         "Dataset": "BRFSS", "Test": "Chi-square",
-        "Null hypothesis": "Missed-care rate is equal across the six New England states",
+        "Null hypothesis": "Missed-care rate is equal across all eleven study states",
         "Statistic": f"chi2={chi2:.1f} (df={dof})", "p-value": p,
     })
 
@@ -1015,6 +1066,52 @@ def save_table(table: pd.DataFrame, filename_stem: str,
 
 
 # ===========================================================================
+# 10. Survey-weighted descriptive statistics (BRFSS)
+# ===========================================================================
+
+def weighted_prevalence_table(brfss: pd.DataFrame) -> pd.DataFrame:
+    """Compute survey-weighted prevalence rates for key binary outcomes
+    using BRFSS person-level weights (_LLCPWT).
+
+    This addresses the survey-weight limitation noted in the report:
+    weighted estimates account for BRFSS's unequal selection probabilities
+    and are more representative of the true population than unweighted rates.
+
+    Returns a table comparing unweighted vs weighted prevalence for the
+    three headline outcomes, overall and by region.
+    """
+    outcomes = {
+        "missed_care_cost": "Missed care due to cost",
+        "uninsured":        "Uninsured",
+        "poor_health":      "Fair/poor self-rated health",
+    }
+    rows = []
+
+    for scope_label, scope_df in [
+        ("Overall",             brfss),
+        ("New England",         brfss[brfss["region"] == "New England"]),
+        ("Lower-income South",  brfss[brfss["region"] == "Lower-income South"]),
+    ]:
+        for col, label in outcomes.items():
+            d = scope_df.dropna(subset=[col, "_LLCPWT"])
+            if len(d) == 0:
+                continue
+            unweighted = d[col].mean()
+            wstats = DescrStatsW(d[col], weights=d["_LLCPWT"], ddof=1)
+            weighted = wstats.mean
+            rows.append({
+                "Scope":        scope_label,
+                "Outcome":      label,
+                "n":            len(d),
+                "Unweighted %": f"{unweighted:.1%}",
+                "Weighted %":   f"{weighted:.1%}",
+                "Difference":   f"{(weighted - unweighted):+.1%}",
+            })
+
+    return pd.DataFrame(rows)
+
+
+# ===========================================================================
 # 9. Master driver — run the whole Milestone 2 analysis end to end
 # ===========================================================================
 
@@ -1026,6 +1123,14 @@ def run_all() -> dict:
     meps = engineer_meps_features(load_meps())
     brfss = engineer_brfss_features(load_brfss())
     print(f"  MEPS : {len(meps):,} rows   BRFSS: {len(brfss):,} rows")
+
+    print("Building ACS regional comparison table...")
+    acs_comparison = acs_region_comparison()
+    save_table(acs_comparison, "m2_acs_region_comparison")
+
+    print("Computing survey-weighted prevalence estimates (BRFSS)...")
+    weighted_prev = weighted_prevalence_table(brfss)
+    save_table(weighted_prev, "m2_weighted_prevalence")
 
     print("Running hypothesis tests...")
     tests = run_hypothesis_tests(meps, brfss)
@@ -1082,6 +1187,8 @@ def run_all() -> dict:
     print("\nDone. Tables -> outputs/tables/m2_*  |  Figures -> outputs/figures/m2_*")
     return {
         "meps": meps, "brfss": brfss,
+        "acs_comparison": acs_comparison,
+        "weighted_prev": weighted_prev,
         "tests": tests, "or_rr": or_rr, "crude": crude,
         "rate_state": rate_state, "rate_income": rate_income,
         "or_brfss": or_brfss, "perf_brfss": perf_brfss,
